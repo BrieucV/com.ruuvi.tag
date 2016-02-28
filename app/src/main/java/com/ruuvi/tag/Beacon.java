@@ -19,17 +19,30 @@ class Beacon {
     byte[] urlServiceData;
 
     class UidStatus {
-        String uidValue;
+        String uidFrameValue;
+        //Strings below are substrings of uidFrameValue
+        String uidNamespaceValue;
+        String uidInstanceValue;
+        String uidRfuValue;
+
         int txPower;
 
         String errTx;
         String errUid;
         String errRfu;
+        String errNamespace;
+        String errInstance;
 
         public String getErrors() {
             StringBuilder sb = new StringBuilder();
             if (errTx != null) {
                 sb.append(BULLET).append(errTx).append("\n");
+            }
+            if (errNamespace != null) {
+                sb.append(BULLET).append(errNamespace).append("\n");
+            }
+            if (errInstance != null) {
+                sb.append(BULLET).append(errInstance).append("\n");
             }
             if (errUid != null) {
                 sb.append(BULLET).append(errUid).append("\n");
@@ -163,8 +176,8 @@ class Beacon {
         return s == null
                 || s.isEmpty()
                 || deviceAddress.replace(":", "").toLowerCase().contains(s.toLowerCase())
-                || (uidStatus.uidValue != null
-                && uidStatus.uidValue.toLowerCase().contains(s.toLowerCase()))
+                || (uidStatus.uidFrameValue != null
+                && uidStatus.uidFrameValue.toLowerCase().contains(s.toLowerCase()))
                 || (urlStatus.urlValue != null
                 && urlStatus.urlValue.toLowerCase().contains(s.toLowerCase()));
     }

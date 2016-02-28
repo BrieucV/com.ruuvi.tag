@@ -1,3 +1,17 @@
+// Copyright 2015 Google Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.ruuvi.tag;
 
 import android.Manifest;
@@ -54,6 +68,10 @@ public class MainActivityFragment extends Fragment {
     private static final ParcelUuid EDDYSTONE_SERVICE_UUID =
             ParcelUuid.fromString("0000FEAA-0000-1000-8000-00805F9B34FB");
 
+    static final byte UID_FRAME_TYPE = 0x00;
+    static final byte URL_FRAME_TYPE = 0x10;
+    static final byte TLM_FRAME_TYPE = 0x20;
+
     /* from settings activity */
     static final String ON_LOST_TIMEOUT_SECS_KEY = "onLostTimeoutSecs";
     static final String SHOW_DEBUG_INFO_KEY = "showDebugInfo";
@@ -72,6 +90,7 @@ public class MainActivityFragment extends Fragment {
     private Map<String /* device address */, Beacon> deviceToBeaconMap = new HashMap<>();
 
     private ArrayList<Beacon> arrayList;
+    private BeaconArrayAdapter arrayAdapter;
 
     private SharedPreferences sharedPreferences;
     private int onLostTimeoutMillis;
@@ -85,10 +104,8 @@ public class MainActivityFragment extends Fragment {
         super.onCreate(savedInstanceState);
         Log.i(TAG, "running init");
         init();
-        arrayList = new ArrayList<>();
-        //arrayAdapter = new BeaconArrayAdapter(getActivity(), R.layout.beacon_list_item, arrayList);
-
-        //scanFilters.add(new ScanFilter.Builder().setServiceUuid(EDDYSTONE_SERVICE_UUID).build());
+        ArrayList<Beacon> arrayList = new ArrayList<>();
+        arrayAdapter = new BeaconArrayAdapter(getActivity(), R.layout.beacon_list_item, arrayList);
         scanCallback = new ScanCallback() {
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
@@ -99,19 +116,23 @@ public class MainActivityFragment extends Fragment {
                 }
 
                 String deviceAddress = result.getDevice().getAddress();
-                Log.i(TAG, "DeviceAddress: " + deviceAddress);
+                //Log.i(TAG, "DeviceAddress: " + deviceAddress);
                 Beacon beacon;
                 if (!deviceToBeaconMap.containsKey(deviceAddress)) {
+                    int hash = deviceAddress.hashCode();
+                    boolean amIhere = deviceToBeaconMap.containsKey(deviceAddress);
                     beacon = new Beacon(deviceAddress, result.getRssi());
+                    Log.i(TAG, "putting device: " + deviceAddress + " to BeaconMap and arrayAdapter");
                     deviceToBeaconMap.put(deviceAddress, beacon);
-                    arrayList.add(beacon);
+                    arrayAdapter.add(beacon);
                 } else {
                     deviceToBeaconMap.get(deviceAddress).lastSeenTimestamp = System.currentTimeMillis();
                     deviceToBeaconMap.get(deviceAddress).rssi = result.getRssi();
                 }
 
                 byte[] serviceData = scanRecord.getServiceData(EDDYSTONE_SERVICE_UUID);
-                Log.i(TAG, String.valueOf(serviceData));
+                //Log.i(TAG,"serviceData: " + Utils.toHexString(serviceData));
+                handleServiceData(deviceAddress, serviceData);
             }
 
             @Override
@@ -148,8 +169,8 @@ public class MainActivityFragment extends Fragment {
         View view = inflater.inflate(R.layout.fragment_main, container, false);
 
         ListView listView = (ListView) view.findViewById(R.id.listView);
-        //listView.setAdapter(arrayList);
-        //listView.setEmptyView(view.findViewById(R.id.placeholder));
+        listView.setAdapter(arrayAdapter);
+        listView.setEmptyView(view.findViewById(R.id.placeholder));
         return view;
     }
 
@@ -197,6 +218,38 @@ public class MainActivityFragment extends Fragment {
         }
     }
 
+    private void handleServiceData(String deviceAddress, byte[] serviceData) {
+        Beacon beacon = deviceToBeaconMap.get(deviceAddress);
+        if (beacon == null) {
+            Log.e(TAG, "Cannot find device from beaconMap: " + deviceAddress);
+            return;
+        }
+        if (serviceData == null) {
+            Log.e(TAG, "Null serviceData");
+            return;
+        }
+
+        switch (serviceData[0]) {
+            case UID_FRAME_TYPE:
+                Log.i(TAG, "Validting UID-FRAME");
+                UidValidator.validate(deviceAddress, serviceData, beacon);
+                break;
+            case TLM_FRAME_TYPE:
+                TlmValidator.validate(deviceAddress, serviceData, beacon);
+                break;
+            case URL_FRAME_TYPE:
+                Log.i(TAG, "Validting URL-FRAME");
+                UrlValidator.validate(deviceAddress, serviceData, beacon);
+                break;
+            default:
+                String err = String.format("Invalid frame type byte %02X", serviceData[0]);
+                beacon.frameStatus.invalidFrameType = err;
+                logDeviceError(deviceAddress, err);
+                break;
+        }
+        arrayAdapter.notifyDataSetChanged();
+    }
+
     private void setOnLostRunnable() {
         Runnable removeLostDevices = new Runnable() {
             @Override
@@ -207,7 +260,7 @@ public class MainActivityFragment extends Fragment {
                     Beacon beacon = itr.next().getValue();
                     if ((time - beacon.lastSeenTimestamp) > onLostTimeoutMillis) {
                         itr.remove();
-                        //arrayAdapter.remove(beacon);
+                        arrayAdapter.remove(beacon);
                     }
                 }
                 handler.postDelayed(this, onLostTimeoutMillis);
@@ -230,5 +283,9 @@ public class MainActivityFragment extends Fragment {
         } else {
             scanner = btAdapter.getBluetoothLeScanner();
         }
+    }
+
+    private static void logDeviceError(String deviceAddress, String err) {
+        Log.e(TAG, deviceAddress + ": " + err);
     }
 }
